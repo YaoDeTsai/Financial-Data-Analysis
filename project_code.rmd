@@ -1,0 +1,471 @@
+````{r}
+source("C:/Users/TYDer/OneDrive/桌面/碩一課程/財務金融資訊分析/function_FDA.R")  
+
+```
+
+```{R}
+setwd("C:/Users/TYDer/OneDrive/桌面/財務金融資訊分析/Financial-Data-Analysis")
+csvpath = "C:/Users/TYDer/OneDrive/桌面/財務金融資訊分析/Assets/"
+
+csvfilesn = list.files( path = csvpath, pattern="*.csv")
+
+tmprt = function(rtcsv){
+read.csv( rtcsv, stringsAsFactors = FALSE)
+}
+Assets = lapply(paste(csvpath,csvfilesn, sep = ""), tmprt)
+
+csvname<-paste0("data_",substr(csvfilesn,1,nchar(csvfilesn)-4))
+
+#transform date format
+for(i in 1:21){Assets[[i]][,1]<-as.Date(Assets[[i]][,1])} 
+
+# no missing data
+for(i in 1:21){print(sum(is.na(Assets[[i]])))} 
+names(Assets)<-csvname
+
+t_sam<-c(1:1007)
+t_oos<-c(1008:1258)
+```
+
+```{r}
+#Summary
+summary1<-matrix(NA,length(csvname),11)
+for(i in 1:length(csvname)){
+Assets[[i]][8]<-rep(NA,nrow(Assets[[i]]));Assets[[i]][9]<-rep(NA,nrow(Assets[[i]]))
+Assets[[i]][8][,1]<-c(NA, retx(Assets[[i]][6][,1]))
+Assets[[i]][9][,1]<-c(NA, logrx(Assets[[i]][6][,1]))
+
+summary1[i,]<-c(nrow(Assets[[i]][t_sam,]),summary(Assets[[i]][8][t_sam,1][-1]), sd(Assets[[i]][8][t_sam,1][-1]),
+  my_skewness(Assets[[i]][8][t_sam,1][-1]),my_kurtosis(Assets[[i]][8][t_sam,1][-1]),my_acf1x(Assets[[i]][8][t_sam,1],na.action = na.pass))
+}
+colnames(summary1)<-c("Obs","Min.","1st Qu.","Median","Mean","3rd Qu.","Max.","Sd.","Skewness","Kurtosis","ACF1")
+round(summary1,3)
+result
+acf(Assets[[i]][8][,1],na.action = na.pass)[[1]]
+
+
+
+
+
+
+```
+
+```{r}
+# collect the return data
+result<-data.frame(matrix(0,nrow(Assets[[1]]),ncol = length(csvname)+1))
+result[,1]<-Assets[[1]][1]
+for(i in 1:length(csvname)){result[,i+1]<-Assets[[i]][8][]}
+result<-result[-1,]
+colnames(result)<-c("Date",csvname)
+result
+
+
+result_multi<-rbind(nrow(result[2:ncol(result)]),
+                    apply(result[2:ncol(result)], 2, summary),
+                    apply(result[2:ncol(result)], 2, var)*252,
+                    apply(result[2:ncol(result)], 2, sd)*sqrt(252),
+                    apply(result[2:ncol(result)], 2, my_skewness)/sqrt(252),
+                    apply(result[2:ncol(result)], 2, my_kurtosis)/252,
+                    apply(result[2:ncol(result)], 2, my_acf1)
+                    )
+
+rownames(result_multi)[c(1,8:nrow(result_multi))]<-c("Obs","Var","Std.","SKewness","Kurtosis","ACF1")
+
+# annualized summary data except min&max
+result_multi[3:6,]<-result_multi[3:6,]*252 
+result_multi<-round(result_multi,3)
+Summary<-t(result_multi)
+
+
+```
+
+```{R}
+#Time series plots of returns
+for(i in 1:length(csvname)){
+plot(x = Assets[[i]][1][,1], y = Assets[[i]][8][,1], type = "l",
+       xlab = "Date", ylab = "",cex.lab = 2, cex.axis = 2, cex.main = 1.8 ,main = paste0("Returns of ", csvname[i]))}
+
+#Time series plots of prices
+for(i in 2:ncol(result)){
+rx1<-result[,i]+1
+crtx<-cumprod(rx1)
+plot(x = result$Date, y = crtx,
+     main = "Cumulative gross return",
+     xlab = "Date", ylab = "Cumulative return", 
+     type="l", lwd =2, 
+     cex.lab = 1.5, cex.axis = 1.2, cex.main = 1.8) +abline(h = 1)}
+```
+
+```{r}
+##collect the oos return data
+result_oos<-result[t_oos,]
+result_oos
+tail(result[t_oos,])
+```
+
+```{r}
+##1/N portfolio
+Nx<-ncol(result_oos)-1                                   ##number of assets 
+wx<-rep(1/Nx, times = Nx)                            ##portfolio weights  
+#por_retN<-as.matrix(result[,2:ncol(result)])%*%wx    ##using weight vector
+por_retN<-por_ret_N(result[t_oos-1, 2:ncol(result_oos)])
+
+##Cumulative daily portfolio return
+N_cumr<-cumprod((1+por_retN))  
+
+plot(x = result_oos$Date, y = N_cumr,
+     main = "Cumulative portfolio return",
+     xlab = "Date", ylab = "Cumulative return", 
+     type="l", lwd =2, 
+     cex.lab = 1.5, cex.axis = 1.2, cex.main = 1.8) +abline(h = 1)
+
+result_multi_5<-c(length(t_oos),
+                    summary(por_retN),
+                    sd(por_retN)*sqrt(252),
+                    var(por_retN)*252,
+                    my_skewness(por_retN)/sqrt(252),
+                    my_kurtosis(por_retN)/252,
+                    my_acf1(por_retN)
+                    )
+
+# annualized summary data except min&max
+result_multi_5[3:6]<-result_multi_5[3:6]*252
+result_multi_5<-round(result_multi_5,3)
+result_multi_5
+
+rfx<-0.01/252
+sharpe_5<-(mean(por_retN)-rfx)/(sd(por_retN))*sqrt(252)
+
+
+C5<-c(VaR_normx(por_retN,100000,0.05),ES_normx(por_retN,1000000,0.05),LPSDx(por_retN,rf))
+
+
+```
+
+#Investment strategies
+
+```{r}
+##buy-and-hold portfolio
+rx<-rbind(0, result_oos[1:nrow(result_oos)-1,2:ncol(result_oos)])                ##add initial period (return=0)   
+rx<-1+rx                                             ##gross return
+bh_cumr<-apply(rx, 2, cumprod)                       ##cumulative return of each asset
+bh_cumr<-apply(bh_cumr, 1, mean)                     ##average of these cumulative returns
+por_retbh1<-por_ret_bh(result_oos[1:nrow(result_oos)-1, 2:ncol(result_oos)])     ##using the function
+
+result_multi_6<-c(length(t_oos),
+                    summary(por_retbh1),
+                    sd(por_retbh1)*sqrt(252),
+                    var(por_retbh1)*252,
+                    my_skewness(por_retbh1)/sqrt(252),
+                    my_kurtosis(por_retbh1)/252,
+                    my_acf1(por_retbh1)
+                    )
+
+# annualized summary data except min&max
+result_multi_6[3:6]<-result_multi_6[3:6]*252 
+result_multi_6<-round(result_multi_6,3)
+result_multi_6
+
+sharpe_6<-(mean(por_retbh1)-rfx)/(sd(por_retbh1))*sqrt(252)
+
+C6<-c(VaR_normx(por_retbh1,100000,0.05),ES_normx(por_retbh1,1000000,0.05),LPSDx(por_retbh1,rf))
+plot(x = result_oos$Date, y = bh_cumr[-1],
+     main = "Cumulative portfolio return for buy-and hold strategy",
+     xlab = "Date", ylab = "Cumulative return", 
+     type="l", lwd =2, 
+     cex.lab = 1.5, cex.axis = 1.2, cex.main = 1)+abline(h = 1)
+```
+
+```{R}
+## price weighted portfolio
+wpx<-matrix(0,length(t_oos),(ncol(result[t_oos,])-1))
+for(i in 1:(ncol(result[t_oos,])-1)){wpx[,i]<-Assets[[i]][6][t_oos,1]}
+for(i in 1:(length(t_oos)-1)){wpx[i,]<-wpx[i,]/sum(wpx[i,])}
+wpx
+
+##use the weights generated from previous day's data 
+wpx<-wpx[-nrow(wpx),]
+
+por_retpw<-numeric(nrow(result_oos))
+##calculate the price-weighted portfolio return
+for(i in 1:(nrow(wpx))){por_retpw[i]<-as.numeric(result_oos[i, 2:ncol(result_oos)])%*%wpx[i,]}
+por_retpw<-por_retpw[-length(por_retpw)]
+por_retpw
+pw_cumr<-cumprod(1+por_retpw)
+pw_cumr
+
+result_multi_7<-c(length(t_oos),
+                    summary(por_retpw),
+                    sd(por_retpw)*sqrt(252),
+                    var(por_retpw)*252,
+                    my_skewness(por_retpw)/sqrt(252),
+                    my_kurtosis(por_retpw)/252,
+                    my_acf1(por_retpw)
+                    )
+# annualized summary data except min&max
+result_multi_7[3:6]<-result_multi_7[3:6]*252 
+result_multi_7<-round(result_multi_7,3)
+result_multi_7
+
+
+sharpe_7<-(mean(por_retpw)-rfx)/(sd(por_retpw))*sqrt(252)
+C7<-c(VaR_normx(por_retpw,100000,0.05),ES_normx(por_retpw,1000000,0.05),LPSDx(por_retpw,rf))
+
+```
+
+
+```{r}
+#gmvp
+library(quadprog)
+result_sam<-result[t_sam,]
+w_gmvp<-gmvp_wx(result_sam[,2:ncol(result_sam)])
+w_mvp<-mvp_wx(result_sam[,2:ncol(result_sam)],0.07/100)
+w_nsgmvp<-nsgmvp_wx_quad(result_sam[,2:ncol(result_sam)])$solution
+w_tan<-tan_wx(result_sam[,2:ncol(result_sam)],0.1/100)
+
+W<-w_gmvp
+
+kx<-nrow(result_sam)                                   ##window length
+hx<-nrow(result)-kx                     ##length of out-of-sample period
+```
+
+```{r}
+#Portfolio_strategy function
+portfolio_strategy<-function(epx,mu_targ,rf,wxmethod){
+## portfolio weights, starting from period t-1
+wx_mat<-matrix(0, hx+1, ncol(result_sam)-1)
+## portfolio net return
+por_netrx<-numeric(hx)
+## turn over rate
+tor<-numeric(hx)
+## HHI
+hhi<-numeric(hx)
+## SLR
+slr<-numeric(hx)
+
+for(i in 1:hx){
+
+  datax<-result[i:(i+kx-1), 2:ncol(result)]             ##data in the window (rolling window)
+ 
+  if(wxmethod=="mvp"){
+  wx<-as.vector(mvp_wx(datax, mu_targ = mu_targ))}      ##mvp
+
+  else if(wxmethod=="nsgmvp"){
+  wx<-nsgmvp_wx_quad(datax)$solution                          ##nsgmvp
+  wx<-round(wx1,8)}
+  
+  else if(wxmethod=="gmvp"){
+  wx<-gmvp_wx(datax)}
+  
+  else if(wxmethod=="tangent"){
+  wx<-tan_wx(datax,rf)}
+  
+  rx<-result[i+kx,2:ncol(result)]                       ##return at period i+kx (period t+1), scaled by 1/100
+  rx_lag<-datax[nrow(datax),]                                            ##return at period i+kx-1 (period t)
+
+  ## individual assets' turnover over rate
+  tor_ind<-wx-wx_mat[i,]*(1+rx_lag)/(1+sum(wx_mat[i,]*rx_lag))
+  
+  ## portfolio turn over rate
+  tor[i]<-sum(abs(tor_ind))
+    
+  ## portfolio net return
+  por_netrx[i]<-(1+sum(wx*rx))*(1-epx*tor[i])-1
+  
+  
+  ## HHI
+  hhi[i]<-sum(wx^2)/(sum(abs(wx))^2)
+  ## SLR
+  slr[i]<-sum(abs(wx[wx<0]))/sum(abs(wx[wx>0]))
+  ## store portfolio weight vector at this period
+  wx_mat[i+1,]<-wx
+}  
+
+## some summary statistics for net portfolio returns
+Summary_por<-cbind(t(summary(por_netrx)), sd(por_netrx))
+colnames(Summary_por)[7]<-"sd"
+## annualized Sharpe ratio, annualized interest rate 1%
+rfx<-0.01/252
+Sharpe_ratio<-(mean(por_netrx)-rfx)/(sd(por_netrx))*sqrt(252)
+## tunrover rate
+Turnover_rate<-cbind(t(summary(tor)),sd(tor))
+colnames(Turnover_rate)[7]<-"sd"
+## HHI index
+HHI<-cbind(t(summary(hhi)),sd(hhi1))
+colnames(HHI)[7]<-"sd"
+## SLR
+SLR<-cbind(t(summary(slr)),sd(slr))
+colnames(SLR)[7]<-"sd"
+#Cum_por
+cumr_por<-cumprod(1+por_netrx)
+
+p<-plot(x = result[(kx+1):nrow(result),]$Date,
+     y = cumr_por, type = "l", lwd =1.5,
+     main = paste0("Cumulative net return (" ,wxmethod,")"),
+     xlab = "Date", ylab = "Cumulative return",
+     cex.lab = 1.8, cex.axis = 1.5, cex.main = 1.8,
+     )
+  por_netrx
+   #money=100000,alpha=0.05
+  A<-list(Summary_por,Sharpe_ratio,Turnover_rate,HHI,SLR,p,por_netrx,VaR_normx(por_netrx,100000,0.05),ES_normx(por_netrx,1000000,0.05),LPSDx(por_netrx,rf))
+  names(A)<-c("Summary_por","Sharpe_ratio","Turnover_rate","HHI","SLR","p","portfolio_net_return","VaR","ES","LPSD")
+  
+  return(A)
+}
+## transaction cost
+epx<-3.5/1000                                                  ##transaction cost
+mu_targ<-0.5/100                                              ##daily return, 0.07%
+rf<-0.1/100
+
+
+port_gmvp<-portfolio_strategy(epx,mu_targ,rf,wxmethod="gmvp")
+port_mvp<-portfolio_strategy(epx,mu_targ,rf,wxmethod="mvp")
+port_nsgmvp<-portfolio_strategy(epx,mu_targ,rf,wxmethod="nsgmvp")
+port_tan<-portfolio_strategy(epx,mu_targ,rf,wxmethod="tangent")
+
+#gmvp
+result_multi_1<-cbind(length(t_oos),
+                    port_gmvp$Summary_por,
+                    var(port_gmvp$portfolio_net_return)*252,
+                    my_skewness(port_gmvp$portfolio_net_return)/sqrt(252),
+                    my_kurtosis(port_gmvp$portfolio_net_return)/252,
+                    my_acf1(port_gmvp$portfolio_net_return)
+                    )
+
+colnames(result_multi_1)[c(1,9:ncol(result_multi_1))]<-c("Obs","Var","SKewness","Kurtosis","ACF1")
+rownames(result_multi_1)[1]<-"gmvp"
+result_multi_1[,3:6]<-result_multi_1[,3:6]*252 #summary中除了min, max外進行年化
+result_multi_1<-round(result_multi_1,3)
+result_multi_1
+
+A_gmvp<-rbind(port_gmvp$HHI,port_gmvp$SLR,port_gmvp$Turnover_rate)
+A_gmvp[,c(2:5)]<-A_gmvp[,c(2:5)]*252
+A_gmvp[,7]<-A_gmvp[,7]*sqrt(252)
+rownames(A_gmvp)<-c("HHI","SLR","Turnover_rate")
+round(A_gmvp,3)
+
+#mvp
+result_multi_2<-cbind(length(t_oos),
+                    port_mvp$Summary_por,
+                    var(port_mvp$portfolio_net_return)*252,
+                    my_skewness(port_mvp$portfolio_net_return)/sqrt(252),
+                    my_kurtosis(port_mvp$portfolio_net_return)/252,
+                    my_acf1(port_mvp$portfolio_net_return)
+                    )
+
+colnames(result_multi_2)[c(1,9:ncol(result_multi_2))]<-c("Obs","Var","SKewness","Kurtosis","ACF1")
+rownames(result_multi_2)[1]<-"mvp"
+result_multi_2[,3:6]<-result_multi_2[,3:6]*252 #summary中除了min, max外進行年化
+result_multi_2<-round(result_multi_2,3)
+result_multi_2
+
+A_mvp<-rbind(port_mvp$HHI,port_mvp$SLR,port_mvp$Turnover_rate)
+A_mvp[,c(2:5)]<-A_mvp[,c(2:5)]*252
+A_mvp[,7]<-A_mvp[,7]*sqrt(252)
+rownames(A_mvp)<-c("HHI","SLR","Turnover_rate")
+round(A_mvp,3)
+
+
+#nsgmvp
+
+result_multi_3<-cbind(length(t_oos),
+                    port_nsgmvp$Summary_por,
+                    var(port_nsgmvp$portfolio_net_return)*252,
+                    my_skewness(port_nsgmvp$portfolio_net_return)/sqrt(252),
+                    my_kurtosis(port_nsgmvp$portfolio_net_return)/252,
+                    my_acf1(port_mvp$portfolio_net_return)
+                    )
+
+colnames(result_multi_3)[c(1,9:ncol(result_multi_3))]<-c("Obs","Var","SKewness","Kurtosis","ACF1")
+rownames(result_multi_3)[1]<-"nsgmvp"
+result_multi_3[,3:6]<-result_multi_3[,3:6]*252 #summary中除了min, max外進行年化
+result_multi_3<-round(result_multi_3,3)
+result_multi_3
+#tangent
+result_multi_4<-cbind(length(t_oos),
+                    port_tan$Summary_por,
+                    var(port_tan$portfolio_net_return)*252,
+                    my_skewness(port_tan$portfolio_net_return)/sqrt(252),
+                    my_kurtosis(port_tan$portfolio_net_return)/252,
+                    my_acf1(port_tan$portfolio_net_return)
+                    )
+
+colnames(result_multi_4)[c(1,9:ncol(result_multi_4))]<-c("Obs","Var","SKewness","Kurtosis","ACF1")
+rownames(result_multi_4)[1]<-"tangent"
+result_multi_4[,3:6]<-result_multi_4[,3:6]*252 #summary中除了min, max外進行年化
+result_multi_4<-round(result_multi_4,3)
+result_multi_4
+
+
+A_nsgmvp<-rbind(port_nsgmvp$HHI,port_nsgmvp$SLR,port_nsgmvp$Turnover_rate)
+A_nsgmvp[,c(2:5)]<-A_nsgmvp[,c(2:5)]*252
+A_nsgmvp[,7]<-A_nsgmvp[,7]*sqrt(252)
+rownames(A_nsgmvp)<-c("HHI","SLR","Turnover_rate")
+A_nsgmvp<-round(A_nsgmvp,3)
+
+port_gmvp$Sharpe_ratio
+
+
+B<-rbind(result_multi_5,result_multi_6,result_multi_7,result_multi_1,result_multi_2,result_multi_3,result_multi_4)
+B<-round(B,3)
+colnames(B)[c(1,8:12)]<-c("Obs","sd","Var","SKewness","Kurtosis","ACF1")
+rownames(B)[1:3]<-c("fixed_weighted","buy-and-hold","price weighted")
+B
+
+C1<-cbind(port_gmvp$VaR,port_gmvp$ES,port_gmvp$LPSD)
+C2<-cbind(port_mvp$VaR,port_mvp$ES,port_mvp$LPSD)
+C3<-cbind(port_nsgmvp$VaR,port_nsgmvp$ES,port_nsgmvp$LPSD)
+C4<-cbind(port_tan$VaR,port_tan$ES,port_tan$LPSD)
+C<-rbind(C5,C6,C7,C1,C2,C3,C4)
+colnames(C)<-c("VaR","ES","LPSD")
+rownames(C)<-c("fixed-weighted","buy-and-hold","price-weighted","gmvp","mvp","nsgmvp","tangent")  
+C<-round(C,3)
+
+D<-matrix(c(sharpe_5,sharpe_6,sharpe_7,port_gmvp$Sharpe_ratio,port_mvp$Sharpe_ratio,port_nsgmvp$Sharpe_ratio,port_tan$Sharpe_ratio),1,7)
+colnames(D)<-c("fixed-weighted","buy-and-hold","price-weighted","gmvp","mvp","nsgmvp","tangent")
+rownames(D)<-c("Sharpe ratio")
+D<-round(D,3)
+```
+
+```{r}
+#Summary
+por_retN; N_cumr<-cumprod((1+por_retN))
+por_retbh1;
+por_retpw;pw_cumr<-cumprod(1+por_retpw)
+port_gmvp$portfolio_net_return ; 
+port_mvp$portfolio_net_return ;
+port_nsgmvp$portfolio_net_return ; 
+port_tan$portfolio_net_return ; 
+C<-matrix()
+port<-matrix(0,250,7)
+port[,1]<-por_retN[1:250] ;port[,2]<-por_retbh1
+port[,3]<-por_retpw ;port[,4]<-port_gmvp$portfolio_net_return
+port[,5]<-port_mvp$portfolio_net_return ; port[,6]<-port_nsgmvp$portfolio_net_return
+port[,7]<-port_tan$portfolio_net_return 
+
+pw_cumr<-cumprod(1+por_retpw)
+port_gmvp$portfolio_net_return ; 
+port_mvp$portfolio_net_return ;
+port_nsgmvp$portfolio_net_return ; 
+port_tan$portfolio_net_return ; 
+C<-c("por_retN","por_retbh1","retpw","gmvp","nsgmvp","port_nsgmvp","port_tan")
+#Time series plots of returns
+
+for(i in 1:7){
+plot(x = Assets[[1]][1009:1258,1], y = port[,i], type = "l",
+       xlab = "Date", ylab = "",cex.lab = 2, cex.axis = 2, cex.main = 1.8,main = paste0("Returns of ",C[i]))}
+#Time series plots of prices
+for(i in 2:ncol(result)){
+rx1<-result[,i]+1
+crtx<-cumprod(rx1)
+plot(x = result$Date, y = crtx,
+     main = "Cumulative gross return",
+     xlab = "Date", ylab = "Cumulative return", 
+     type="l", lwd =2, 
+     cex.lab = 1.5, cex.axis = 1.2, cex.main = 1.8) +abline(h = 1)}
+cumprod<-matrix(0,250,7)
+for(i in 1:7){cumprod[,5]<-cumprod(1+port[,5])}
+for(i in 1:7){
+  plot(x = Assets[[1]][1009:1258,1], y = cumprod[,i], type = "l",
+       xlab = "Date", ylab = "",cex.lab = 2, cex.axis = 2, cex.main = 1.8,main = paste0("Returns of ",C[i]))}
+```
